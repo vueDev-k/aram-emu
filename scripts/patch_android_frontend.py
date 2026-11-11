@@ -114,6 +114,24 @@ replace_file(
     '\t}\n'
     '\ts.openRequest(OpenRequest{Path: path, DisplayName: s.rememberedDisplayName(path)})',
 )
+# The Android Home launcher is a library browser, not a running title.
+# Hide the entire touch control deck (including numeric keypad) there to
+# restore vertical space; restore the persisted controls when a game starts.
+replace_file(
+    "shell_input.go",
+    'func (s *Shell) onScreenControlsHidden() bool {\n'
+    '\tif !platformUsesTouchLayout() {\n'
+    '\t\treturn false\n'
+    '\t}',
+    'func (s *Shell) onScreenControlsHidden() bool {\n'
+    '\tif !platformUsesTouchLayout() {\n'
+    '\t\treturn false\n'
+    '\t}\n'
+    '\tif s.showHomeSurface() {\n'
+    '\t\treturn true\n'
+    '\t}',
+)
+
 # Android's SAF library survives a game-open failure. Offer an explicit
 # way back to the existing Home launcher without invoking the file picker.
 # closeInput uses the already patched Android-safe rescan behavior.
