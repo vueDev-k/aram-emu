@@ -87,6 +87,19 @@ replace_file(
     '\t\t} else if strings.EqualFold(filepath.Clean(existing.Path), path) {\n'
     '\t\t\treturn true\n\t\t}',
 )
+# Android's native SAF folder is not in desktop GameLibraryFolders. Closing
+# a game must not run the desktop rescan (which would wipe the SAF snapshot).
+replace_file(
+    "shell_media.go",
+    '\t// Closing a title returns to the Home surface; refresh the Installed tab in\\n'
+    '\t// case the library changed while a title was open.\\n'
+    '\ts.rescanLibrary()',
+    '\t// Keep the native SAF library already scanned on Android.\\n'
+    '\tif androidFolderLabel == "" {\\n'
+    '\t\ts.rescanLibrary()\\n'
+    '\t}',
+)
+
 # Keep the existing launcher and opener. Android library rows are SAF URIs,
 # so selecting one must invoke the *existing* native document-import flow,
 # which imports on a worker and then calls Mobile.openDocument as before.
