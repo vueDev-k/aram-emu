@@ -130,6 +130,48 @@ replace_file(
     '  "Back to game list": "게임 목록으로 돌아가기",',
 )
 
+# On touch devices the EbitenUI list-combo popup can extend past the
+# viewport. For the UI-skin selector, use two in-row navigation buttons
+# instead, so every model stays reachable without off-screen scrolling.
+replace_file(
+    "ui_settings_row_widget.go",
+    '\tif model.dropdown != nil {\n\t\tdropdownModel := model.dropdown',
+    '\tif model.dropdown != nil {\n'
+    '\t\tif platformUsesTouchLayout() && model.label == "UI skin" {\n'
+    '\t\t\tselector := model.dropdown\n'
+    '\t\t\tcount := selector.count\n'
+    '\t\t\tif count > 0 {\n'
+    '\t\t\t\tcurrent := func() int { return clampInt(selector.value(), 0, count-1) }\n'
+    '\t\t\t\tgroup := widget.NewContainer(\n'
+    '\t\t\t\t\twidget.ContainerOpts.Layout(widget.NewRowLayout(\n'
+    '\t\t\t\t\t\twidget.RowLayoutOpts.Direction(widget.DirectionHorizontal),\n'
+    '\t\t\t\t\t\twidget.RowLayoutOpts.Spacing(design.Space.XS),\n'
+    '\t\t\t\t\t)),\n'
+    '\t\t\t\t\twidget.ContainerOpts.WidgetOpts(widget.WidgetOpts.LayoutData(actionLayout)),\n'
+    '\t\t\t\t)\n'
+    '\t\t\t\tbuttonWidth := max(design.px(36), actionWidth/2-design.Space.XS)\n'
+    '\t\t\t\tfor _, direction := range []int{-1, 1} {\n'
+    '\t\t\t\t\tstep := direction\n'
+    '\t\t\t\t\tlabel := "◀"\n'
+    '\t\t\t\t\tif step > 0 { label = "▶" }\n'
+    '\t\t\t\t\tbutton := design.button(label, design.Components.SubtleButton,\n'
+    '\t\t\t\t\t\tdesign.Type.Strong, buttonWidth, design.px(36),\n'
+    '\t\t\t\t\t\twidget.TextPositionCenter, func() {\n'
+    '\t\t\t\t\t\t\tif model.disabled { return }\n'
+    '\t\t\t\t\t\t\tselector.apply((current()+step+count)%count)\n'
+    '\t\t\t\t\t\t\tu.owner.buttonHaptic()\n'
+    '\t\t\t\t\t\t\tu.panelSignature = ""\n'
+    '\t\t\t\t\t\t})\n'
+    '\t\t\t\t\tbutton.GetWidget().Disabled = model.disabled\n'
+    '\t\t\t\t\tgroup.AddChild(button)\n'
+    '\t\t\t\t}\n'
+    '\t\t\t\trow.AddChild(group)\n'
+    '\t\t\t\treturn row\n'
+    '\t\t\t}\n'
+    '\t\t}\n'
+    '\t\tdropdownModel := model.dropdown',
+)
+
 # Android-only LG CYON-inspired models reuse the existing retro sprite pack
 # and its UI skin dropdown. They are intentionally distinct from the original
 # upstream families and do not change the emulator's guest display.
