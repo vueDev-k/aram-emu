@@ -100,7 +100,8 @@ public final class GameLibraryActivity extends Activity {
             try {
                 Uri tree = Uri.parse(saved);
                 scanDirectory(tree, DocumentsContract.getTreeDocumentId(tree), found, seen);
-                Collections.sort(found, Comparator.comparing(g -> g.title.toLowerCase(java.util.Locale.ROOT)));
+                Collections.sort(found, (left, right) -> left.title.toLowerCase(java.util.Locale.ROOT)
+                        .compareTo(right.title.toLowerCase(java.util.Locale.ROOT)));
             } catch (Exception e) {
                 error = "폴더를 읽을 수 없습니다. 다시 선택하세요.";
             }
