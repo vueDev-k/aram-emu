@@ -101,8 +101,17 @@ func SubmitAndroidGameLibrary(entriesJSON, folder string) error {
             continue
         }
         seen[record.URI] = true
+        // Mirror the desktop library: the .zip suffix is not part of the
+        // launcher title. Preserve the original filename for native importing.
+        displayName := strings.TrimSpace(record.Name)
+        if strings.HasSuffix(strings.ToLower(displayName), ".zip") {
+            displayName = displayName[:len(displayName)-len(".zip")]
+        }
+        if displayName == "" {
+            displayName = record.Name
+        }
         names[record.URI] = record.Name
-        entries = append(entries, LibraryEntry{Path: record.URI, Name: record.Name})
+        entries = append(entries, LibraryEntry{Path: record.URI, Name: displayName})
     }
     sort.Slice(entries, func(i, j int) bool {
         a := strings.ToLower(entries[i].Name)
