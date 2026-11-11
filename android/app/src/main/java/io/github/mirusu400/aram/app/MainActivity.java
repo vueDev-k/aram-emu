@@ -21,6 +21,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.LocaleList;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
@@ -60,6 +61,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import go.Seq;
 import io.github.mirusu400.aram.mobile.EbitenView;
@@ -71,6 +73,9 @@ public final class MainActivity extends Activity
         implements Host, PerformanceHost, AudioManager.OnAudioFocusChangeListener {
     private static final int REQUEST_DOCUMENT = 1001;
     private static final int REQUEST_EXPORT_DOCUMENT = 1002;
+    private static final int REQUEST_LIBRARY_FOLDER = 1003;
+    private static final String LIBRARY_PREFS = "game_library";
+    private static final String LIBRARY_TREE = "tree_uri";
     private static final String STATE_PENDING_DOCUMENT_KIND = "pending_document_kind";
     private static final String STATE_PENDING_EXPORT_PATH = "pending_export_path";
     private static final String STATE_PENDING_EXPORT_TITLE = "pending_export_title";
@@ -94,6 +99,9 @@ public final class MainActivity extends Activity
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final Map<String, Bundle> pendingImports = new LinkedHashMap<>();
 
+    private final ExecutorService gameLibraryScanner = Executors.newSingleThreadExecutor();
+    private final AtomicInteger gameLibraryScanGeneration = new AtomicInteger();
+    private final Map<String, ParcelFileDescriptor> borrowedLibraryFiles = new LinkedHashMap<>();
     private IncomingIntentState incomingIntentState;
 
     private EbitenView gameView;
@@ -144,6 +152,9 @@ public final class MainActivity extends Activity
         observeAudioOutput();
         Mobile.configureStorage(getFilesDir().getAbsolutePath());
         Mobile.setHost(this);
+        // Reuse the SAF tree already selected in the older library activity.
+        // Publish its ZIP metadata directly into the existing Go Home screen.
+        refreshGameLibrary();
         performanceTuner = new PerformanceTuner(getApplicationContext());
         Mobile.setPerformanceHost(this);
 
@@ -655,6 +666,24 @@ public final class MainActivity extends Activity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_LIBRARY_FOLDER) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                Mobile.documentSelectionCanceled();
+                return;
+            }
+            Uri tree = data.getData();
+            try {
+                getContentResolver().takePersistableUriPermission(
+                        tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE).edit()
+                        .putString(LIBRARY_TREE, tree.toString()).apply();
+                refreshGameLibrary();
+            } catch (SecurityException error) {
+                Mobile.documentSelectionCanceled();
+                Toast.makeText(this, "게임 폴더 접근 권한을 저장할 수 없습니다", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode == REQUEST_EXPORT_DOCUMENT) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 File source = new File(pendingExportPath);
@@ -685,6 +714,105 @@ public final class MainActivity extends Activity
             }
         }
         importDocument(uri, pendingDocumentKind);
+    }
+
+    // The Go Home -> Library tab invokes this through its native picker.
+    @Override
+    public void requestGameLibraryFolder() {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) {
+                Mobile.documentSelectionCanceled();
+                return;
+            }
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(intent, REQUEST_LIBRARY_FOLDER);
+        });
+    }
+
+    @Override
+    public void forgetGameLibraryFolder() {
+        runOnUiThread(() -> {
+            getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE).edit()
+                    .remove(LIBRARY_TREE).apply();
+            refreshGameLibrary();
+        });
+    }
+
+    // No ZIP data is copied: the backend reopens this borrowed, seekable
+    // /proc/self/fd path in the same process and owns the resulting os.File.
+    @Override
+    public String openLibraryFile(String uri) throws Exception {
+        if (!"content".equals(Uri.parse(uri).getScheme())) {
+            throw new IOException("Invalid game library URI");
+        }
+        ParcelFileDescriptor descriptor = getContentResolver()
+                .openFileDescriptor(Uri.parse(uri), "r");
+        if (descriptor == null) {
+            throw new IOException("The document provider returned no file descriptor");
+        }
+        String path = "/proc/self/fd/" + descriptor.getFd();
+        synchronized (borrowedLibraryFiles) {
+            borrowedLibraryFiles.put(path, descriptor);
+        }
+        return path;
+    }
+
+    @Override
+    public void closeLibraryFile(String path) {
+        ParcelFileDescriptor descriptor;
+        synchronized (borrowedLibraryFiles) {
+            descriptor = borrowedLibraryFiles.remove(path);
+        }
+        if (descriptor != null) {
+            try {
+                descriptor.close();
+            } catch (IOException ignored) {
+                // The integration backend already owns its reopened descriptor.
+            }
+        }
+    }
+
+    private void refreshGameLibrary() {
+        final int generation = gameLibraryScanGeneration.incrementAndGet();
+        final String saved = getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE)
+                .getString(LIBRARY_TREE, null);
+        if (saved == null || saved.isEmpty()) {
+            Mobile.updateGameLibrary("[]", "");
+            return;
+        }
+        gameLibraryScanner.execute(() -> {
+            String json = null;
+            String label = "";
+            String problem = null;
+            try {
+                Uri tree = Uri.parse(saved);
+                json = AndroidGameLibrary.scan(getContentResolver(), tree);
+                label = AndroidGameLibrary.folderLabel(tree);
+            } catch (Exception error) {
+                problem = error.getMessage();
+            }
+            final String entries = json;
+            final String folder = label;
+            final String failure = problem;
+            mainHandler.post(() -> {
+                if (generation != gameLibraryScanGeneration.get()
+                        || isFinishing() || isDestroyed()) return;
+                if (failure != null) {
+                    Mobile.documentSelectionCanceled();
+                    Toast.makeText(this, "게임 폴더 검색 실패: " + failure,
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String message = Mobile.updateGameLibrary(entries, folder);
+                if (message != null && !message.isEmpty()) {
+                    Mobile.documentSelectionCanceled();
+                    Toast.makeText(this, "게임 목록 등록 실패: " + message,
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        });
     }
 
     @Override
@@ -870,6 +998,18 @@ public final class MainActivity extends Activity
         if (textInputDialog != null) {
             textInputDialog.dismiss();
             textInputDialog = null;
+        }
+        gameLibraryScanGeneration.incrementAndGet();
+        gameLibraryScanner.shutdownNow();
+        synchronized (borrowedLibraryFiles) {
+            for (ParcelFileDescriptor descriptor : borrowedLibraryFiles.values()) {
+                try {
+                    descriptor.close();
+                } catch (IOException ignored) {
+                    // Activity is closing.
+                }
+            }
+            borrowedLibraryFiles.clear();
         }
         Mobile.setHost(null);
         super.onDestroy();
