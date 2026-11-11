@@ -134,7 +134,8 @@ jobs:
           TEST_RUNNER_SHA: ${{ steps.requested.outputs.test_runner_ref }}
 
   workspace-gate:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'release'\n    name: Public workspace regression
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    name: Public workspace regression
     needs: resolve-components
     uses: ./.github/workflows/workspace-gate.yml
     with:
@@ -144,7 +145,8 @@ jobs:
       authd_sha: ${{ needs.resolve-components.outputs.authd_sha }}
 
   desktop:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'release'\n    name: ${{ matrix.name }}
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    name: ${{ matrix.name }}
     needs:
       - resolve-components
     strategy:
@@ -667,7 +669,8 @@ jobs:
           retention-days: 14
 
   libretro-android:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'release'\n    name: Android libretro core
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    name: Android libretro core
     needs:
       - resolve-components
     runs-on: windows-latest
@@ -785,7 +788,8 @@ jobs:
           retention-days: 14
 
   web:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'release'\n    name: Web (WebAssembly)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    name: Web (WebAssembly)
     needs:
       - resolve-components
     runs-on: ubuntu-latest
@@ -901,7 +905,8 @@ jobs:
           retention-days: 14
 
   rgds:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'release'\n    name: RG DS (ROCKNIX linux/arm64)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    name: RG DS (ROCKNIX linux/arm64)
     needs:
       - resolve-components
     runs-on: ubuntu-latest
