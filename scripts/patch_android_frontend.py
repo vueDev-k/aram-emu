@@ -114,22 +114,20 @@ replace_file(
     '\t}\n'
     '\ts.openRequest(OpenRequest{Path: path, DisplayName: s.rememberedDisplayName(path)})',
 )
-# The Android Home launcher is a library browser, not a running title.
-# Hide the entire touch control deck (including numeric keypad) there to
-# restore vertical space; restore the persisted controls when a game starts.
+# Retain the touch joystick/keypad in Home. The original list already
+# scrolls its selected row on d-pad up/down; reduce Android-only header
+# clutter so the selected row has usable vertical space alongside the deck.
 replace_file(
-    "shell_input.go",
-    'func (s *Shell) onScreenControlsHidden() bool {\n'
-    '\tif !platformUsesTouchLayout() {\n'
-    '\t\treturn false\n'
-    '\t}',
-    'func (s *Shell) onScreenControlsHidden() bool {\n'
-    '\tif !platformUsesTouchLayout() {\n'
-    '\t\treturn false\n'
-    '\t}\n'
-    '\tif s.showHomeSurface() {\n'
-    '\t\treturn true\n'
-    '\t}',
+    "ui_home.go",
+    '\tif installed {\n\t\tu.homeBody.AddChild(u.homeFolderBar(shell, folders))',
+    '\tif installed && !(platformUsesTouchLayout() && androidFolderLabel != "") {\n'
+    '\t\tu.homeBody.AddChild(u.homeFolderBar(shell, folders))',
+)
+replace_file(
+    "ui_home.go",
+    '\tif installed {\n\t\tcontentTop = u.design.px(homeTabBarHeight + homeSoftkeyHeight)\n\t}',
+    '\tif installed && !(platformUsesTouchLayout() && androidFolderLabel != "") {\n'
+    '\t\tcontentTop = u.design.px(homeTabBarHeight + homeSoftkeyHeight)\n\t}',
 )
 
 # Android's SAF library survives a game-open failure. Offer an explicit
