@@ -114,6 +114,44 @@ replace_file(
     '\t}\n'
     '\ts.openRequest(OpenRequest{Path: path, DisplayName: s.rememberedDisplayName(path)})',
 )
+# Android-only LG CYON-inspired models reuse the existing retro sprite pack
+# and its UI skin dropdown. They are intentionally distinct from the original
+# upstream families and do not change the emulator's guest display.
+replace_file(
+    "theme_family.go",
+    'return []string{"chrome-blue", "candy-orange", "mono-lcd", "glass-touch", "neon-edge"}',
+    'return []string{"chrome-blue", "candy-orange", "mono-lcd", "glass-touch", "neon-edge", '
+    '"cyon-chocolate", "cyon-icecream", "cyon-lollipop"}',
+)
+replace_file(
+    "theme_family.go",
+    '\tcase "neon-edge":\n\t\treturn "Neon Edge"',
+    '\tcase "neon-edge":\n\t\treturn "Neon Edge"\n'
+    '\tcase "cyon-chocolate":\n\t\treturn "LG CYON Chocolate (KV5900)"\n'
+    '\tcase "cyon-icecream":\n\t\treturn "LG CYON Ice Cream (LH5000)"\n'
+    '\tcase "cyon-lollipop":\n\t\treturn "LG CYON Lollipop (SV800)"',
+)
+replace_file(
+    "theme_family.go",
+    'func retroThemeID(family, mode string) string {\n\tif mode == "dark" {',
+    'func retroThemeID(family, mode string) string {\n'
+    '\t// Use existing, fully embedded sprites until model-specific assets '
+    'are independently drawn.\n'
+    '\tswitch family {\n'
+    '\tcase "cyon-chocolate":\n\t\tfamily = "neon-edge"\n'
+    '\tcase "cyon-icecream":\n\t\tfamily = "candy-orange"\n'
+    '\tcase "cyon-lollipop":\n\t\tfamily = "glass-touch"\n'
+    '\t}\n'
+    '\tif mode == "dark" {',
+)
+replace_file(
+    "design_system_retro.go",
+    '\tds.Palette = retroPalette(theme, ds.Palette)',
+    '\tds.Palette = cyonPalette(family, ds.Mode, retroPalette(theme, ds.Palette))',
+)
+cyon_source = product / "android" / "frontend-overlay" / "cyon_skin_android.go.src"
+shutil.copyfile(cyon_source, frontend / "frontend" / "cyon_skin_android.go")
+
 source = product / "android" / "frontend-overlay" / "android_library_android.go.src"
 destination = frontend / "frontend" / "android_library_android.go"
 shutil.copyfile(source, destination)
