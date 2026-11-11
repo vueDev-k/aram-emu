@@ -107,8 +107,7 @@ type Host interface {
 	// exposes them to Java and the proxy can dispatch them back into Android.
 	RequestGameLibraryFolder()
 	ForgetGameLibraryFolder()
-	OpenLibraryFile(uri string) (string, error)
-	CloseLibraryFile(path string)
+	OpenLibraryGame(uri string)
 }
 
 // PerformanceHost receives callbacks on the actual locked emulation/audio OS
