@@ -52,6 +52,7 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -768,6 +769,44 @@ public final class MainActivity extends Activity
             }
             importDocument(document, DOCUMENT_KIND_INPUT);
         });
+    }
+
+    // Invoked by the existing frontend icon loader on a background goroutine.
+    // ContentResolver understands SAF URIs, but the original loader.Icon
+    // requires a file path. Make one bounded temporary copy for the requested
+    // (visible) game only; Go removes the file after extracting its PNG icon.
+    // The normal game-open/import flow remains unchanged.
+    @Override
+    public String prepareLibraryIcon(String uri) {
+        if (uri == null || !uri.startsWith("content://")) return "";
+        File temporary = null;
+        boolean completed = false;
+        try {
+            temporary = File.createTempFile("aram-library-icon-", ".zip", getCacheDir());
+            try (InputStream raw = getContentResolver().openInputStream(Uri.parse(uri))) {
+                if (raw == null) return "";
+                try (InputStream input = new BufferedInputStream(raw);
+                        OutputStream output = new BufferedOutputStream(new FileOutputStream(temporary))) {
+                    byte[] buffer = new byte[65536];
+                    long total = 0;
+                    int read;
+                    while ((read = input.read(buffer)) != -1) {
+                        total += read;
+                        if (total > 256L * 1024L * 1024L) {
+                            throw new IOException("Game exceeds 256 MiB icon inspection limit");
+                        }
+                        output.write(buffer, 0, read);
+                    }
+                }
+            }
+            completed = true;
+            return temporary.getAbsolutePath();
+        } catch (IOException | SecurityException error) {
+            Log.w("ARAM", "Could not inspect library icon", error);
+            return "";
+        } finally {
+            if (!completed && temporary != null) temporary.delete();
+        }
     }
 
     private void refreshGameLibrary() {
