@@ -400,6 +400,17 @@ public final class MainActivity extends Activity
      */
     @Override
     public void pinGameShortcut(String path, String title, byte[] iconPNG) throws Exception {
+        if (path.startsWith("content://")) {
+            // Validate the persisted SAF read grant before pinning.
+            try (ParcelFileDescriptor document = getContentResolver()
+                    .openFileDescriptor(Uri.parse(path), "r")) {
+                if (document == null) throw new IOException("Game document is no longer accessible");
+            }
+            String label = title == null || title.trim().isEmpty()
+                    ? "ARAM game" : title.trim();
+            runOnUiThread(() -> requestGameShortcut(path, label, iconPNG));
+            return;
+        }
         File file = new File(path).getCanonicalFile();
         File root = getFilesDir().getCanonicalFile();
         if (!file.getPath().startsWith(root.getPath() + File.separator) || !file.isFile()) {
@@ -407,11 +418,11 @@ public final class MainActivity extends Activity
         }
         String label = title == null || title.trim().isEmpty()
                 ? file.getName() : title.trim();
-        runOnUiThread(() -> requestGameShortcut(file, label, iconPNG));
+        runOnUiThread(() -> requestGameShortcut(file.getAbsolutePath(), label, iconPNG));
     }
 
     @TargetApi(Build.VERSION_CODES.O)
-    private void requestGameShortcut(File file, String title, byte[] iconPNG) {
+    private void requestGameShortcut(String path, String title, byte[] iconPNG) {
         if (isFinishing() || isDestroyed()) {
             return;
         }
@@ -435,7 +446,7 @@ public final class MainActivity extends Activity
                 GAME_SHORTCUT_PREFERENCES, MODE_PRIVATE
         );
         if (!preferences.edit()
-                .putString(id + ".path", file.getAbsolutePath())
+                .putString(id + ".path", path)
                 .putString(id + ".title", title)
                 .commit()) {
             Toast.makeText(this, R.string.shortcut_request_failed, Toast.LENGTH_LONG).show();
@@ -506,6 +517,10 @@ public final class MainActivity extends Activity
         );
         String path = preferences.getString(id + ".path", "");
         String title = preferences.getString(id + ".title", "");
+        if (path.startsWith("content://")) {
+            Mobile.openDocument(path, title);
+            return;
+        }
         try {
             File file = new File(path).getCanonicalFile();
             File root = getFilesDir().getCanonicalFile();
