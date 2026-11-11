@@ -114,6 +114,22 @@ replace_file(
     '\t}\n'
     '\ts.openRequest(OpenRequest{Path: path, DisplayName: s.rememberedDisplayName(path)})',
 )
+# Android's SAF library survives a game-open failure. Offer an explicit
+# way back to the existing Home launcher without invoking the file picker.
+# closeInput uses the already patched Android-safe rescan behavior.
+replace_file(
+    "ui_problem.go",
+    '\taddButton("file.open", "Open another file", true, shell.chooseFile)',
+    '\taddButton("problem.home", "Back to game list", true, shell.closeInput)\n'
+    '\taddButton("file.open", "Open another file", false, shell.chooseFile)',
+)
+replace_file(
+    "locales/ko.json",
+    '  "Open another file": "다른 파일 열기",',
+    '  "Open another file": "다른 파일 열기",\n'
+    '  "Back to game list": "게임 목록으로 돌아가기",',
+)
+
 # Android-only LG CYON-inspired models reuse the existing retro sprite pack
 # and its UI skin dropdown. They are intentionally distinct from the original
 # upstream families and do not change the emulator's guest display.
