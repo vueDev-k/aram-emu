@@ -213,6 +213,10 @@ jobs:
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/28.2.13676358" \
             >> "${GITHUB_ENV}"
 
+      - name: Integrate Android SAF library into pinned frontend
+        shell: bash
+        run: python3 aram-emu/scripts/patch_android_frontend.py aram-frontend
+
       - name: Build integrated Android AAR
         working-directory: aram-emu
         shell: bash
