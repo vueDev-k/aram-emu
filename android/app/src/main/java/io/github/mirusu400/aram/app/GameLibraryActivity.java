@@ -18,6 +18,9 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Optional Android launcher for a persistent folder-based ZIP game library. */
 public final class GameLibraryActivity extends Activity {
@@ -27,6 +30,8 @@ public final class GameLibraryActivity extends Activity {
     private final ArrayList<Game> games = new ArrayList<>();
     private ArrayAdapter<String> adapter;
     private TextView status;
+    private final ExecutorService scanner = Executors.newSingleThreadExecutor();
+    private int scanGeneration;
 
     private static final class Game {
         final String title;
@@ -79,44 +84,68 @@ public final class GameLibraryActivity extends Activity {
     }
 
     private void scan() {
-        games.clear();
-        adapter.clear();
-        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(TREE, null);
-        if (saved == null) { status.setText("게임 ZIP 폴더를 선택하세요."); return; }
-        try {
-            Uri tree = Uri.parse(saved);
-            String root = DocumentsContract.getTreeDocumentId(tree);
-            scanDirectory(tree, root, 0, new int[]{0});
-            Collections.sort(games, Comparator.comparing(g -> g.title.toLowerCase(java.util.Locale.ROOT)));
-            for (Game game : games) adapter.add(game.title);
-            status.setText("게임 " + games.size() + "개");
-        } catch (Exception e) {
-            status.setText("폴더를 읽을 수 없습니다. 다시 선택하세요.");
+        final int generation = ++scanGeneration;
+        final String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(TREE, null);
+        if (saved == null) {
+            games.clear();
+            adapter.clear();
+            status.setText("게임 ZIP 폴더를 선택하세요.");
+            return;
         }
+        status.setText("하위 폴더를 검색하는 중...");
+        scanner.execute(() -> {
+            final ArrayList<Game> found = new ArrayList<>();
+            final HashSet<String> seen = new HashSet<>();
+            String error = null;
+            try {
+                Uri tree = Uri.parse(saved);
+                scanDirectory(tree, DocumentsContract.getTreeDocumentId(tree), found, seen);
+                Collections.sort(found, (left, right) -> left.title.toLowerCase(java.util.Locale.ROOT)
+                        .compareTo(right.title.toLowerCase(java.util.Locale.ROOT)));
+            } catch (Exception e) {
+                error = "폴더를 읽을 수 없습니다. 다시 선택하세요.";
+            }
+            final String failure = error;
+            runOnUiThread(() -> {
+                if (generation != scanGeneration || isFinishing()) return;
+                if (failure != null) { status.setText(failure); return; }
+                games.clear();
+                games.addAll(found);
+                adapter.clear();
+                for (Game game : games) adapter.add(game.title);
+                status.setText("게임 " + games.size() + "개");
+            });
+        });
     }
 
-    private void scanDirectory(Uri tree, String id, int depth, int[] visited) {
-        if (depth > 16 || visited[0] > 10000) return;
+    private void scanDirectory(Uri tree, String id, ArrayList<Game> found, HashSet<String> seen) {
+        if (Thread.currentThread().isInterrupted() || !seen.add(id)) return;
         Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id);
         try (android.database.Cursor cursor = getContentResolver().query(children,
                 new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                         DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                         DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null)) {
             if (cursor == null) return;
-            while (cursor.moveToNext() && visited[0]++ < 10000) {
+            while (!Thread.currentThread().isInterrupted() && cursor.moveToNext()) {
                 String childId = cursor.getString(0);
                 String name = cursor.getString(1);
                 String mime = cursor.getString(2);
                 if (name == null || childId == null) continue;
                 if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
-                    scanDirectory(tree, childId, depth + 1, visited);
-                } else if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) {
-                    games.add(new Game(name, DocumentsContract.buildDocumentUriUsingTree(tree, childId)));
+                    scanDirectory(tree, childId, found, seen);
+                } else if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip") && seen.add(childId)) {
+                    found.add(new Game(name, DocumentsContract.buildDocumentUriUsingTree(tree, childId)));
                 }
             }
         } catch (Exception ignored) {
-            // Individual inaccessible subdirectories should not hide other games.
+            // Continue scanning other accessible folders.
         }
+    }
+
+    @Override protected void onDestroy() {
+        ++scanGeneration;
+        scanner.shutdownNow();
+        super.onDestroy();
     }
 
     private void openGame(Game game) {

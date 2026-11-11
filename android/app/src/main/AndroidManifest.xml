@@ -16,15 +16,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ARAM"
         android:usesCleartextTraffic="false">
+        <!-- GameLibraryActivity is kept for compatibility, but no longer
+             appears as a second launcher icon. The native library is shown
+             inside MainActivity's existing Home -> Library tab. -->
         <activity
             android:name=".GameLibraryActivity"
-            android:exported="true"
-            android:label="ARAM 게임 라이브러리">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="false"
+            android:label="ARAM 게임 라이브러리" />
 
         <activity
             android:name=".MainActivity"

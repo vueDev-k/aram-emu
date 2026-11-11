@@ -21,6 +21,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.LocaleList;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
@@ -51,6 +52,7 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -60,6 +62,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import go.Seq;
 import io.github.mirusu400.aram.mobile.EbitenView;
@@ -71,6 +74,9 @@ public final class MainActivity extends Activity
         implements Host, PerformanceHost, AudioManager.OnAudioFocusChangeListener {
     private static final int REQUEST_DOCUMENT = 1001;
     private static final int REQUEST_EXPORT_DOCUMENT = 1002;
+    private static final int REQUEST_LIBRARY_FOLDER = 1003;
+    private static final String LIBRARY_PREFS = "game_library";
+    private static final String LIBRARY_TREE = "tree_uri";
     private static final String STATE_PENDING_DOCUMENT_KIND = "pending_document_kind";
     private static final String STATE_PENDING_EXPORT_PATH = "pending_export_path";
     private static final String STATE_PENDING_EXPORT_TITLE = "pending_export_title";
@@ -94,6 +100,8 @@ public final class MainActivity extends Activity
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final Map<String, Bundle> pendingImports = new LinkedHashMap<>();
 
+    private final ExecutorService gameLibraryScanner = Executors.newSingleThreadExecutor();
+    private final AtomicInteger gameLibraryScanGeneration = new AtomicInteger();
     private IncomingIntentState incomingIntentState;
 
     private EbitenView gameView;
@@ -144,6 +152,9 @@ public final class MainActivity extends Activity
         observeAudioOutput();
         Mobile.configureStorage(getFilesDir().getAbsolutePath());
         Mobile.setHost(this);
+        // Reuse the SAF tree already selected in the older library activity.
+        // Publish its ZIP metadata directly into the existing Go Home screen.
+        refreshGameLibrary();
         performanceTuner = new PerformanceTuner(getApplicationContext());
         Mobile.setPerformanceHost(this);
 
@@ -389,6 +400,17 @@ public final class MainActivity extends Activity
      */
     @Override
     public void pinGameShortcut(String path, String title, byte[] iconPNG) throws Exception {
+        if (path.startsWith("content://")) {
+            // Validate the persisted SAF read grant before pinning.
+            try (ParcelFileDescriptor document = getContentResolver()
+                    .openFileDescriptor(Uri.parse(path), "r")) {
+                if (document == null) throw new IOException("Game document is no longer accessible");
+            }
+            String label = title == null || title.trim().isEmpty()
+                    ? "ARAM game" : title.trim();
+            runOnUiThread(() -> requestGameShortcut(path, label, iconPNG));
+            return;
+        }
         File file = new File(path).getCanonicalFile();
         File root = getFilesDir().getCanonicalFile();
         if (!file.getPath().startsWith(root.getPath() + File.separator) || !file.isFile()) {
@@ -396,11 +418,11 @@ public final class MainActivity extends Activity
         }
         String label = title == null || title.trim().isEmpty()
                 ? file.getName() : title.trim();
-        runOnUiThread(() -> requestGameShortcut(file, label, iconPNG));
+        runOnUiThread(() -> requestGameShortcut(file.getAbsolutePath(), label, iconPNG));
     }
 
     @TargetApi(Build.VERSION_CODES.O)
-    private void requestGameShortcut(File file, String title, byte[] iconPNG) {
+    private void requestGameShortcut(String path, String title, byte[] iconPNG) {
         if (isFinishing() || isDestroyed()) {
             return;
         }
@@ -424,7 +446,7 @@ public final class MainActivity extends Activity
                 GAME_SHORTCUT_PREFERENCES, MODE_PRIVATE
         );
         if (!preferences.edit()
-                .putString(id + ".path", file.getAbsolutePath())
+                .putString(id + ".path", path)
                 .putString(id + ".title", title)
                 .commit()) {
             Toast.makeText(this, R.string.shortcut_request_failed, Toast.LENGTH_LONG).show();
@@ -495,6 +517,10 @@ public final class MainActivity extends Activity
         );
         String path = preferences.getString(id + ".path", "");
         String title = preferences.getString(id + ".title", "");
+        if (path.startsWith("content://")) {
+            openLibraryGame(path);
+            return;
+        }
         try {
             File file = new File(path).getCanonicalFile();
             File root = getFilesDir().getCanonicalFile();
@@ -655,6 +681,24 @@ public final class MainActivity extends Activity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_LIBRARY_FOLDER) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                Mobile.documentSelectionCanceled();
+                return;
+            }
+            Uri tree = data.getData();
+            try {
+                getContentResolver().takePersistableUriPermission(
+                        tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE).edit()
+                        .putString(LIBRARY_TREE, tree.toString()).apply();
+                refreshGameLibrary();
+            } catch (SecurityException error) {
+                Mobile.documentSelectionCanceled();
+                Toast.makeText(this, "게임 폴더 접근 권한을 저장할 수 없습니다", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode == REQUEST_EXPORT_DOCUMENT) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 File source = new File(pendingExportPath);
@@ -685,6 +729,125 @@ public final class MainActivity extends Activity
             }
         }
         importDocument(uri, pendingDocumentKind);
+    }
+
+    // The Go Home -> Library tab invokes this through its native picker.
+    @Override
+    public void requestGameLibraryFolder() {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) {
+                Mobile.documentSelectionCanceled();
+                return;
+            }
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(intent, REQUEST_LIBRARY_FOLDER);
+        });
+    }
+
+    @Override
+    public void forgetGameLibraryFolder() {
+        runOnUiThread(() -> {
+            getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE).edit()
+                    .remove(LIBRARY_TREE).apply();
+            refreshGameLibrary();
+        });
+    }
+
+    // Home library rows reuse the same SAF -> app-private import -> Go open
+    // path as the normal Android document picker. No /proc/self/fd re-open.
+    @Override
+    public void openLibraryGame(String uri) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            Uri document = Uri.parse(uri);
+            if (!"content".equals(document.getScheme())) {
+                Toast.makeText(this, "올바르지 않은 게임 파일 주소입니다",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            importDocument(document, DOCUMENT_KIND_INPUT);
+        });
+    }
+
+    // Invoked by the existing frontend icon loader on a background goroutine.
+    // ContentResolver understands SAF URIs, but the original loader.Icon
+    // requires a file path. Make one bounded temporary copy for the requested
+    // (visible) game only; Go removes the file after extracting its PNG icon.
+    // The normal game-open/import flow remains unchanged.
+    @Override
+    public String prepareLibraryIcon(String uri) {
+        if (uri == null || !uri.startsWith("content://")) return "";
+        File temporary = null;
+        boolean completed = false;
+        try {
+            temporary = File.createTempFile("aram-library-icon-", ".zip", getCacheDir());
+            try (InputStream raw = getContentResolver().openInputStream(Uri.parse(uri))) {
+                if (raw == null) return "";
+                try (InputStream input = new BufferedInputStream(raw);
+                        OutputStream output = new BufferedOutputStream(new FileOutputStream(temporary))) {
+                    byte[] buffer = new byte[65536];
+                    long total = 0;
+                    int read;
+                    while ((read = input.read(buffer)) != -1) {
+                        total += read;
+                        if (total > 256L * 1024L * 1024L) {
+                            throw new IOException("Game exceeds 256 MiB icon inspection limit");
+                        }
+                        output.write(buffer, 0, read);
+                    }
+                }
+            }
+            completed = true;
+            return temporary.getAbsolutePath();
+        } catch (IOException | SecurityException error) {
+            Log.w("ARAM", "Could not inspect library icon", error);
+            return "";
+        } finally {
+            if (!completed && temporary != null) temporary.delete();
+        }
+    }
+
+    private void refreshGameLibrary() {
+        final int generation = gameLibraryScanGeneration.incrementAndGet();
+        final String saved = getSharedPreferences(LIBRARY_PREFS, MODE_PRIVATE)
+                .getString(LIBRARY_TREE, null);
+        if (saved == null || saved.isEmpty()) {
+            Mobile.updateGameLibrary("[]", "");
+            return;
+        }
+        gameLibraryScanner.execute(() -> {
+            String json = null;
+            String label = "";
+            String problem = null;
+            try {
+                Uri tree = Uri.parse(saved);
+                json = AndroidGameLibrary.scan(getContentResolver(), tree);
+                label = AndroidGameLibrary.folderLabel(tree);
+            } catch (Exception error) {
+                problem = error.getMessage();
+            }
+            final String entries = json;
+            final String folder = label;
+            final String failure = problem;
+            mainHandler.post(() -> {
+                if (generation != gameLibraryScanGeneration.get()
+                        || isFinishing() || isDestroyed()) return;
+                if (failure != null) {
+                    Mobile.documentSelectionCanceled();
+                    Toast.makeText(this, "게임 폴더 검색 실패: " + failure,
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String message = Mobile.updateGameLibrary(entries, folder);
+                if (message != null && !message.isEmpty()) {
+                    Mobile.documentSelectionCanceled();
+                    Toast.makeText(this, "게임 목록 등록 실패: " + message,
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        });
     }
 
     @Override
@@ -871,6 +1034,8 @@ public final class MainActivity extends Activity
             textInputDialog.dismiss();
             textInputDialog = null;
         }
+        gameLibraryScanGeneration.incrementAndGet();
+        gameLibraryScanner.shutdownNow();
         Mobile.setHost(null);
         super.onDestroy();
     }

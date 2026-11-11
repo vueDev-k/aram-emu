@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/mobile"
 
+	"github.com/mirusu400/aram-core/loader"
 	"github.com/mirusu400/aram-emu/integration"
 	"github.com/mirusu400/aram-emu/internal/remoteinput"
 	"github.com/mirusu400/aram-frontend/frontend"
@@ -65,6 +67,24 @@ type productBackend struct {
 	*integration.Backend
 }
 
+// Icon reuses aram-core's existing icon parser and the frontend's PNG cache.
+// Only visible SAF library entries need a temporary native-readable file.
+func (backend *productBackend) Icon(path string) ([]byte, error) {
+	if !strings.HasPrefix(path, "content://") {
+		return backend.Backend.Icon(path)
+	}
+	host := currentHost()
+	if host == nil {
+		return nil, errors.New("Android library icon host is unavailable")
+	}
+	tempPath := host.PrepareLibraryIcon(path)
+	if tempPath == "" {
+		return nil, errors.New("Android library icon is unavailable")
+	}
+	defer os.Remove(tempPath)
+	return loader.Icon(tempPath)
+}
+
 func (backend *productBackend) InstallProductUpdate(
 	update frontend.ProductUpdate,
 ) error {
@@ -103,6 +123,13 @@ type Host interface {
 	// The native host persists the private path and puts only an opaque ID in
 	// the launcher intent.
 	PinGameShortcut(path, title string, iconPNG []byte) error
+	// Android SAF game library operations. These belong on Host so gomobile
+	// exposes them to Java and the proxy can dispatch them back into Android.
+	RequestGameLibraryFolder()
+	ForgetGameLibraryFolder()
+	OpenLibraryGame(uri string)
+	// PrepareLibraryIcon exposes a bounded temporary SAF copy to loader.Icon.
+	PrepareLibraryIcon(uri string) string
 }
 
 // PerformanceHost receives callbacks on the actual locked emulation/audio OS
@@ -178,12 +205,14 @@ func SetHost(host Host) {
 		frontend.SetNativeTextInputHost(nil)
 		frontend.SetNativeShareHost(nil)
 		frontend.SetNativeShortcutHost(nil)
+        platformSetAndroidLibraryHost(nil)
 		return
 	}
 	frontend.SetNativePickerHost(host)
 	frontend.SetNativeTextInputHost(host)
 	frontend.SetNativeShareHost(host)
 	frontend.SetNativeShortcutHost(host)
+    platformSetAndroidLibraryHost(host)
 }
 
 // SubmitTextInput reports the text the native editor accepted for the field

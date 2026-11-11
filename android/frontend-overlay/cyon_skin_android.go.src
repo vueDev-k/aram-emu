@@ -1,0 +1,105 @@
+//go:build android
+
+package frontend
+
+// CYON model-inspired skins keep the existing retro sprite geometry and
+// change semantic colors for each model. This is an original interpretation,
+// not an extraction of LG firmware resources or a pixel-perfect replica.
+// Game rendering, input mapping, and the original UI widgets are unchanged.
+func cyonPalette(family, mode string, base ARAMPalette) ARAMPalette {
+    p := base
+    switch family {
+    case "cyon-chocolate":
+        // KV5900: piano-black slider with bright red touch navigation.
+        p.Canvas = hexNRGBA("#08080B")
+        p.CanvasRaised = hexNRGBA("#111116")
+        p.Surface = hexNRGBA("#1C1B21")
+        p.SurfaceRaised = hexNRGBA("#242329")
+        p.SurfaceHover = hexNRGBA("#343039")
+        p.Border = hexNRGBA("#4C3139")
+        p.BorderStrong = hexNRGBA("#B52846")
+        p.Text = hexNRGBA("#F7F0F1")
+        p.TextMuted = hexNRGBA("#C0A5AB")
+        p.OnAccent = hexNRGBA("#FFFFFF")
+        p.OnTitle = hexNRGBA("#FFFFFF")
+        p.Accent = hexNRGBA("#EB3150")
+        p.AccentHover = hexNRGBA("#FF6378")
+        p.AccentPressed = hexNRGBA("#B31631")
+        p.AccentSoft = hexNRGBA("#4D1423")
+        p.GuestSurface = hexNRGBA("#101017")
+        p.GuestInk = hexNRGBA("#FF6B7E")
+    case "cyon-icecream":
+        // LH5000: pastel pink and creamy white flip-phone shell.
+        p.Canvas = hexNRGBA("#FFF4F8")
+        p.CanvasRaised = hexNRGBA("#F7CFE0")
+        p.Surface = hexNRGBA("#FFECF2")
+        p.SurfaceRaised = hexNRGBA("#FFF7F9")
+        p.SurfaceHover = hexNRGBA("#F9DFEA")
+        p.Border = hexNRGBA("#E4A9C3")
+        p.BorderStrong = hexNRGBA("#B46B8B")
+        p.Text = hexNRGBA("#64334C")
+        p.TextMuted = hexNRGBA("#9E6A83")
+        p.OnAccent = hexNRGBA("#FFFFFF")
+        p.OnTitle = hexNRGBA("#64334C")
+        p.Accent = hexNRGBA("#E878AC")
+        p.AccentHover = hexNRGBA("#F49DC4")
+        p.AccentPressed = hexNRGBA("#CB548E")
+        p.AccentSoft = hexNRGBA("#FFE0EE")
+        p.GuestSurface = hexNRGBA("#FFF2F6")
+        p.GuestInk = hexNRGBA("#A24C79")
+        if mode == "dark" {
+            // A subdued pink night option, not the bright day palette.
+            p.Canvas = hexNRGBA("#23131C")
+            p.CanvasRaised = hexNRGBA("#39212F")
+            p.Surface = hexNRGBA("#422939")
+            p.SurfaceRaised = hexNRGBA("#503243")
+            p.SurfaceHover = hexNRGBA("#674052")
+            p.Border = hexNRGBA("#81506C")
+            p.BorderStrong = hexNRGBA("#C47B9F")
+            p.Text = hexNRGBA("#FFE5F1")
+            p.TextMuted = hexNRGBA("#D5A6BD")
+            p.OnTitle = hexNRGBA("#FFE5F1")
+            p.AccentSoft = hexNRGBA("#5D2844")
+            p.GuestSurface = hexNRGBA("#24141F")
+            p.GuestInk = hexNRGBA("#F4A4C6")
+        }
+    case "cyon-lollipop":
+        // SV800: playful aqua-blue / white rounded flip-phone treatment.
+        p.Canvas = hexNRGBA("#F0FBFC")
+        p.CanvasRaised = hexNRGBA("#C2EAF0")
+        p.Surface = hexNRGBA("#E8F9FB")
+        p.SurfaceRaised = hexNRGBA("#FFFFFF")
+        p.SurfaceHover = hexNRGBA("#D5F3F6")
+        p.Border = hexNRGBA("#83C9D5")
+        p.BorderStrong = hexNRGBA("#3C9EAE")
+        p.Text = hexNRGBA("#205663")
+        p.TextMuted = hexNRGBA("#53818A")
+        p.OnAccent = hexNRGBA("#FFFFFF")
+        p.OnTitle = hexNRGBA("#205663")
+        p.Accent = hexNRGBA("#32ACC1")
+        p.AccentHover = hexNRGBA("#64CEDA")
+        p.AccentPressed = hexNRGBA("#208A9E")
+        p.AccentSoft = hexNRGBA("#BDF0F4")
+        p.GuestSurface = hexNRGBA("#E8FDFF")
+        p.GuestInk = hexNRGBA("#217C90")
+        if mode == "dark" {
+            p.Canvas = hexNRGBA("#0C2530")
+            p.CanvasRaised = hexNRGBA("#143943")
+            p.Surface = hexNRGBA("#19444E")
+            p.SurfaceRaised = hexNRGBA("#245460")
+            p.SurfaceHover = hexNRGBA("#2E6570")
+            p.Border = hexNRGBA("#387987")
+            p.BorderStrong = hexNRGBA("#6DB9C5")
+            p.Text = hexNRGBA("#E1FAFC")
+            p.TextMuted = hexNRGBA("#A4CDD5")
+            p.OnTitle = hexNRGBA("#E1FAFC")
+            p.AccentSoft = hexNRGBA("#125563")
+            p.GuestSurface = hexNRGBA("#0A222A")
+            p.GuestInk = hexNRGBA("#8CE0E8")
+        }
+    default:
+        return p
+    }
+    p.TextDisabled = mixNRGBA(p.TextMuted, p.Surface, 0.45)
+    return p
+}

@@ -1,0 +1,363 @@
+name: Android fast build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-components:
+    name: Resolve product components
+    runs-on: ubuntu-latest
+    outputs:
+      core_sha: ${{ steps.revisions.outputs.core_sha }}
+      frontend_sha: ${{ steps.revisions.outputs.frontend_sha }}
+      authd_sha: ${{ steps.revisions.outputs.authd_sha }}
+      ebiten_sha: ${{ steps.revisions.outputs.ebiten_sha }}
+      test_runner_sha: ${{ steps.revisions.outputs.test_runner_sha }}
+    steps:
+      - name: Check out product manifest
+        uses: actions/checkout@v6
+        with:
+          path: aram-emu
+          persist-credentials: false
+
+      - name: Select requested component refs
+        id: requested
+        working-directory: aram-emu
+        shell: bash
+        env:
+          CORE_REF_OVERRIDE: ${{ inputs.core_ref }}
+          FRONTEND_REF_OVERRIDE: ${{ inputs.frontend_ref }}
+          AUTHD_REF_OVERRIDE: ${{ inputs.authd_ref }}
+          EBITEN_REF_OVERRIDE: ${{ inputs.ebiten_ref }}
+        run: |
+          for component in core frontend authd ebiten test_runner; do
+            locked_ref="$(jq -er --arg component "${component}" '.[$component]' product-components.json)"
+            [[ "${locked_ref}" =~ ^[0-9a-f]{40}$ ]]
+          done
+          core_ref="${CORE_REF_OVERRIDE:-$(jq -r '.core' product-components.json)}"
+          frontend_ref="${FRONTEND_REF_OVERRIDE:-$(jq -r '.frontend' product-components.json)}"
+          authd_ref="${AUTHD_REF_OVERRIDE:-$(jq -r '.authd' product-components.json)}"
+          ebiten_ref="${EBITEN_REF_OVERRIDE:-$(jq -r '.ebiten' product-components.json)}"
+          test_runner_ref="$(jq -er '.test_runner' product-components.json)"
+          test -n "${core_ref}"
+          test "${core_ref}" != "null"
+          test -n "${frontend_ref}"
+          test "${frontend_ref}" != "null"
+          test -n "${authd_ref}"
+          test "${authd_ref}" != "null"
+          test -n "${ebiten_ref}"
+          test "${ebiten_ref}" != "null"
+          echo "core_ref=${core_ref}" >> "${GITHUB_OUTPUT}"
+          echo "frontend_ref=${frontend_ref}" >> "${GITHUB_OUTPUT}"
+          echo "authd_ref=${authd_ref}" >> "${GITHUB_OUTPUT}"
+          echo "ebiten_ref=${ebiten_ref}" >> "${GITHUB_OUTPUT}"
+          echo "test_runner_ref=${test_runner_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out core
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-core
+          ref: ${{ steps.requested.outputs.core_ref }}
+          path: aram-core
+          persist-credentials: false
+
+      - name: Check out frontend
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-frontend
+          ref: ${{ steps.requested.outputs.frontend_ref }}
+          path: aram-frontend
+          persist-credentials: false
+
+      - name: Check out authd
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-authd
+          ref: ${{ steps.requested.outputs.authd_ref }}
+          path: aram-authd
+          persist-credentials: false
+
+      - name: Check out ebiten fork
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/ebiten
+          ref: ${{ steps.requested.outputs.ebiten_ref }}
+          path: ebiten
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record exact component revisions
+        id: revisions
+        shell: bash
+        run: |
+          echo "core_sha=$(git -C aram-core rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "frontend_sha=$(git -C aram-frontend rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "authd_sha=$(git -C aram-authd rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "ebiten_sha=$(git -C ebiten rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "test_runner_sha=${TEST_RUNNER_SHA}" >> "${GITHUB_OUTPUT}"
+        env:
+          TEST_RUNNER_SHA: ${{ steps.requested.outputs.test_runner_ref }}
+  android-armv7-core:
+    name: Android ARMv7 portable core
+    needs:
+      - resolve-components
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out core
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-core
+          ref: ${{ needs.resolve-components.outputs.core_sha }}
+          path: aram-core
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: aram-core/go.mod
+          cache-dependency-path: aram-core/go.sum
+
+      - name: Install ARM user emulation
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+
+      - name: Run core tests on ARMv7 with NEON
+        working-directory: aram-core
+        env:
+          GOWORK: "off"
+          GOOS: linux
+          GOARCH: arm
+          GOARM: "7"
+          CGO_ENABLED: "0"
+        # This executes 32-bit ARM code, including the portable Go JIT. The
+        # Android job separately compiles the Android JNI and audio bindings.
+        run: go test -count=1 -timeout=10m -exec 'qemu-arm -cpu cortex-a15' ./...
+  android:
+    name: Android universal APK
+    needs:
+      - resolve-components
+      - android-armv7-core
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out product
+        uses: actions/checkout@v6
+        with:
+          path: aram-emu
+          persist-credentials: false
+
+      - name: Check out core
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-core
+          ref: ${{ needs.resolve-components.outputs.core_sha }}
+          path: aram-core
+          persist-credentials: false
+
+      - name: Check out frontend
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-frontend
+          ref: ${{ needs.resolve-components.outputs.frontend_sha }}
+          path: aram-frontend
+          persist-credentials: false
+
+      - name: Check out authd
+        uses: actions/checkout@v6
+        with:
+          repository: mirusu400/aram-authd
+          ref: ${{ needs.resolve-components.outputs.authd_sha }}
+          path: aram-authd
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          # ebitenmobile's generated binding module resolves the current
+          # x/text release, whose toolchain floor is newer than the product's
+          # own Go directive.
+          go-version: 1.26.x
+          cache-dependency-path: |
+            aram-emu/go.sum
+            aram-emu/go.work.sum
+            aram-core/go.sum
+            aram-frontend/go.sum
+            aram-authd/go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.1.0"
+          cache-provider: basic
+
+      - name: Install 16 KB-compatible Android NDK
+        shell: bash
+        run: |
+          sdkmanager="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          test -x "${sdkmanager}"
+          "${sdkmanager}" "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/28.2.13676358" \
+            >> "${GITHUB_ENV}"
+
+      - name: Integrate Android SAF library into pinned frontend
+        shell: bash
+        run: python3 aram-emu/scripts/patch_android_frontend.py aram-frontend
+
+      - name: Build integrated Android AAR
+        working-directory: aram-emu
+        shell: bash
+        env:
+          CORE_SHA: ${{ needs.resolve-components.outputs.core_sha }}
+          FRONTEND_SHA: ${{ needs.resolve-components.outputs.frontend_sha }}
+          ARAM_POSTHOG_API_KEY: ${{ secrets.ARAM_POSTHOG_API_KEY }}
+        run: |
+          # The binder copies in the Java glue that calls the bound package's
+          # own API, so a binder older than the Ebitengine this module builds
+          # against will not compile. Take the version from go.mod so the two
+          # can never drift apart again.
+          ebiten_version="$(go list -m -f '{{.Version}}' \
+            github.com/hajimehoshi/ebiten/v2)"
+          go install \
+            "github.com/hajimehoshi/ebiten/v2/cmd/ebitenmobile@${ebiten_version}"
+          mkdir -p android/app/libs android/app/src/main/assets
+          emu_short="${GITHUB_SHA::7}"
+          core_short="${CORE_SHA::7}"
+          frontend_short="${FRONTEND_SHA::7}"
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Stable release tag must look like v0.4.0" >&2
+              exit 1
+            fi
+            build_version="${GITHUB_REF_NAME}"
+            android_version_name="${GITHUB_REF_NAME#v}"
+          elif [[ ("${GITHUB_EVENT_NAME}" == "push" ||
+                   "${GITHUB_EVENT_NAME}" == "workflow_dispatch") &&
+                  "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            build_version="Nightly-${emu_short}-c${core_short}-f${frontend_short}"
+            android_version_name="${GITHUB_SHA}"
+          else
+            build_version="Development-${emu_short}-c${core_short}-f${frontend_short}"
+            android_version_name="${GITHUB_SHA}"
+          fi
+          ebitenmobile bind \
+            -target android/arm,android/arm64,android/amd64 \
+            -androidapi 23 \
+            -trimpath \
+            -ldflags="-s -w -X=github.com/mirusu400/aram-frontend/frontend.BuildVersion=${build_version} -X=github.com/mirusu400/aram-frontend/frontend.AnalyticsAPIKey=${ARAM_POSTHOG_API_KEY}" \
+            -javapkg io.github.mirusu400.aram \
+            -o android/app/libs/aram.aar \
+            ./mobile
+          {
+            echo "aram-emu=${GITHUB_SHA}"
+            echo "aram-core=${{ needs.resolve-components.outputs.core_sha }}"
+            echo "aram-frontend=${{ needs.resolve-components.outputs.frontend_sha }}"
+            echo "aram-authd=${{ needs.resolve-components.outputs.authd_sha }}"
+          } > android/app/src/main/assets/BUILD-INFO.txt
+          # Reused by the Google Play AAB step, which rebinds a play-flavor aar
+          # with the same version but with the self-updater switched off.
+          echo "ARAM_BUILD_VERSION=${build_version}" >> "${GITHUB_ENV}"
+          echo "ARAM_VERSION_NAME=${android_version_name}" >> "${GITHUB_ENV}"
+
+      - name: Build and lint Android APK
+        working-directory: aram-emu
+        shell: bash
+        env:
+          ARAM_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          # The sideload channels ship the github flavor; the play flavor is a
+          # separate store artifact built below. Lint always runs against the
+          # github debug variant (the known-good gate). A release event ships
+          # the stable channel ("ARAM", base package, stable-signed); every
+          # other event ships the rolling nightly ("ARAM Nightly", .nightly
+          # package, nightly-signed).
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            gradle --no-daemon --stacktrace -p android \
+              :app:testGithubDebugUnitTest :app:lintGithubDebug :app:assembleGithubRelease
+            {
+              echo "ARAM_APK=android/app/build/outputs/apk/github/release/app-github-release.apk"
+              echo "ARAM_APP_PKG=io.github.mirusu400.aram"
+              echo "ARAM_APP_LABEL=ARAM"
+              echo "ARAM_CERT_CN=CN=ARAM, O=ARAM, C=KR"
+              echo "ARAM_CERT_SHA=98:98:4B:3B:FF:4E:1D:2A:13:09:AC:26:C3:6F:97:CC:5A:A2:49:90:87:E7:94:85:BE:85:8A:5A:1E:59:2F:29"
+            } >> "${GITHUB_ENV}"
+          else
+            gradle --no-daemon --stacktrace -p android \
+              :app:testGithubDebugUnitTest :app:lintGithubDebug :app:assembleGithubDebug
+            {
+              echo "ARAM_APK=android/app/build/outputs/apk/github/debug/app-github-debug.apk"
+              echo "ARAM_APP_PKG=io.github.mirusu400.aram.nightly"
+              echo "ARAM_APP_LABEL=ARAM Nightly"
+              echo "ARAM_CERT_CN=CN=ARAM Nightly, O=ARAM, C=KR"
+              echo "ARAM_CERT_SHA=F6:03:45:3C:75:84:DF:C3:CA:E6:B1:FB:4C:75:67:71:D1:7D:56:12:7D:38:1B:09:B4:18:62:B1:3A:3F:6C:C8"
+            } >> "${GITHUB_ENV}"
+          fi
+
+      - name: Verify Android package
+        working-directory: aram-emu
+        shell: bash
+        run: |
+          apk="${ARAM_APK}"
+          test -f "${apk}"
+          python3 -m unittest discover -s scripts -p 'test_verify_android_*.py'
+          python3 scripts/verify_android_native.py android/app/libs/aram.aar
+          python3 scripts/verify_android_native.py "${apk}"
+          python3 scripts/verify_android_manifest.py "${apk}"
+          unzip -p "${apk}" assets/BUILD-INFO.txt | grep -Fx \
+            "aram-emu=${GITHUB_SHA}"
+          aapt="$(find "${ANDROID_HOME}/build-tools" -name aapt -type f |
+            sort -V | tail -n 1)"
+          test -x "${aapt}"
+          "${aapt}" dump badging "${apk}" > android/app/build/apk-badging.txt
+          echo "::group::apk-badging.txt (icon/application lines, for diagnosing icon check failures)"
+          grep -iE 'icon|application' android/app/build/apk-badging.txt || true
+          echo "::endgroup::"
+          echo "::group::APK entries (mipmap/drawable/icon)"
+          unzip -Z1 "${apk}" | grep -iE 'mipmap|drawable|icon' || true
+          echo "::endgroup::"
+          grep -F "package: name='${ARAM_APP_PKG}'" \
+            android/app/build/apk-badging.txt
+          expected_version_name="${ARAM_VERSION_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" != "release" ]]; then
+            expected_version_name="${expected_version_name}-nightly"
+          fi
+          grep -F "versionCode='${GITHUB_RUN_NUMBER}' versionName='${expected_version_name}'" \
+            android/app/build/apk-badging.txt
+          grep -F "application-label:'${ARAM_APP_LABEL}'" \
+            android/app/build/apk-badging.txt
+          grep -F "launchable-activity: name='io.github.mirusu400.aram.app.MainActivity'" \
+            android/app/build/apk-badging.txt
+          # R8/resource shrinking can shorten resource paths. Resolve the icon
+          # path from package metadata instead of requiring its source name.
+          icon_path="$(sed -n "s/^application:.* icon='\([^']*\)'.*/\1/p" \
+            android/app/build/apk-badging.txt | head -n 1)"
+          test -n "${icon_path}"
+          unzip -Z1 "${apk}" | grep -Fx "${icon_path}"
+          keytool -printcert -jarfile "${apk}" \
+            > android/app/build/apk-signing.txt
+          grep -F "Owner: ${ARAM_CERT_CN}" \
+            android/app/build/apk-signing.txt
+          grep -F \
+            "SHA256: ${ARAM_CERT_SHA}" \
+            android/app/build/apk-signing.txt
+          mkdir -p dist
+          cp "${apk}" dist/aram-android-universal.apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: aram-android-universal
+          path: aram-emu/dist/aram-android-universal.apk
+          if-no-files-found: error
+          retention-days: 14
+

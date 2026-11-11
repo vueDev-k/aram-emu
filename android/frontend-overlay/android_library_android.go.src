@@ -1,0 +1,135 @@
+//go:build android
+
+package frontend
+
+import (
+    "encoding/json"
+    "errors"
+    "sort"
+    "strings"
+    "sync"
+)
+
+// NativeAndroidLibraryHost handles Android's persisted SAF folder picker.
+type NativeAndroidLibraryHost interface {
+    RequestGameLibraryFolder()
+    ForgetGameLibraryFolder()
+    OpenLibraryGame(uri string)
+}
+
+var androidLibraryHost struct {
+    sync.RWMutex
+    host NativeAndroidLibraryHost
+}
+
+func SetNativeAndroidLibraryHost(host NativeAndroidLibraryHost) {
+    androidLibraryHost.Lock()
+    androidLibraryHost.host = host
+    androidLibraryHost.Unlock()
+}
+
+func requestNativeGameLibraryFolder() error {
+    androidLibraryHost.RLock()
+    host := androidLibraryHost.host
+    androidLibraryHost.RUnlock()
+    if host == nil {
+        return ErrPickerUnavailable
+    }
+    host.RequestGameLibraryFolder()
+    return ErrPickerDeferred
+}
+
+func requestForgetAndroidLibraryFolder() {
+    androidLibraryHost.RLock()
+    host := androidLibraryHost.host
+    androidLibraryHost.RUnlock()
+    if host != nil {
+        host.ForgetGameLibraryFolder()
+    }
+}
+
+func requestNativeOpenLibraryGame(uri string) bool {
+    androidLibraryHost.RLock()
+    host := androidLibraryHost.host
+    androidLibraryHost.RUnlock()
+    if host == nil {
+        return false
+    }
+    host.OpenLibraryGame(uri)
+    return true
+}
+
+type androidLibraryRecord struct {
+    Name string `json:"name"`
+    URI string `json:"uri"`
+}
+type androidLibrarySnapshot struct {
+    entries []LibraryEntry
+    folder string
+}
+
+// Android sends an entire scan at once. Processing occurs in Shell.Update,
+// avoiding races with the home UI and its Ebitengine widgets.
+var androidLibraryUpdates = make(chan androidLibrarySnapshot, 1)
+var androidFolderLabel string // only read/written by the Shell.Update goroutine
+
+var androidLibraryNames struct {
+    sync.RWMutex
+    values map[string]string
+}
+
+func AndroidLibraryDisplayName(uri string) string {
+    androidLibraryNames.RLock()
+    name := androidLibraryNames.values[uri]
+    androidLibraryNames.RUnlock()
+    return name
+}
+
+func SubmitAndroidGameLibrary(entriesJSON, folder string) error {
+    var records []androidLibraryRecord
+    if err := json.Unmarshal([]byte(entriesJSON), &records); err != nil {
+        return err
+    }
+    seen := make(map[string]bool, len(records))
+    names := make(map[string]string, len(records))
+    entries := make([]LibraryEntry, 0, len(records))
+    for _, record := range records {
+        if !strings.HasPrefix(record.URI, "content://") || record.Name == "" {
+            return errors.New("invalid Android library entry")
+        }
+        if seen[record.URI] {
+            continue
+        }
+        seen[record.URI] = true
+        // Mirror the desktop library: the .zip suffix is not part of the
+        // launcher title. Preserve the original filename for native importing.
+        displayName := strings.TrimSpace(record.Name)
+        if strings.HasSuffix(strings.ToLower(displayName), ".zip") {
+            displayName = displayName[:len(displayName)-len(".zip")]
+        }
+        if displayName == "" {
+            displayName = record.Name
+        }
+        names[record.URI] = record.Name
+        entries = append(entries, LibraryEntry{Path: record.URI, Name: displayName})
+    }
+    sort.Slice(entries, func(i, j int) bool {
+        a := strings.ToLower(entries[i].Name)
+        b := strings.ToLower(entries[j].Name)
+        if a != b {
+            return a < b
+        }
+        return entries[i].Path < entries[j].Path
+    })
+    androidLibraryNames.Lock()
+    androidLibraryNames.values = names
+    androidLibraryNames.Unlock()
+    snapshot := androidLibrarySnapshot{entries: entries, folder: folder}
+    // Keep only the latest scan if several folder selections finish together.
+    select {
+    case <-androidLibraryUpdates:
+    default:
+    }
+    androidLibraryUpdates <- snapshot
+    return nil
+}

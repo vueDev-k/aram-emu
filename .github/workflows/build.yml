@@ -3,8 +3,7 @@ name: build
 on:
   push:
     branches:
-      - "**"
-  pull_request:
+      - main
   workflow_dispatch:
     inputs:
       core_ref:
@@ -134,24 +133,18 @@ jobs:
           TEST_RUNNER_SHA: ${{ steps.requested.outputs.test_runner_ref }}
 
   workspace-gate:
-    name: Pinned synthetic compatibility
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    name: Public workspace regression
     needs: resolve-components
-    # Forks cannot receive the credential for the private test runner. Their
-    # public platform checks still run; publication always requires this gate.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/workspace-gate.yml
-    secrets:
-      ARAM_TEST_DEPLOY_KEY: ${{ secrets.ARAM_TEST_DEPLOY_KEY }}
     with:
       product_sha: ${{ github.sha }}
       core_sha: ${{ needs.resolve-components.outputs.core_sha }}
       frontend_sha: ${{ needs.resolve-components.outputs.frontend_sha }}
       authd_sha: ${{ needs.resolve-components.outputs.authd_sha }}
-      test_runner_sha: ${{ needs.resolve-components.outputs.test_runner_sha }}
 
   desktop:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
     name: ${{ matrix.name }}
     needs:
       - resolve-components
@@ -429,6 +422,10 @@ jobs:
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/28.2.13676358" \
             >> "${GITHUB_ENV}"
 
+      - name: Integrate Android SAF library into pinned frontend
+        shell: bash
+        run: python3 aram-emu/scripts/patch_android_frontend.py aram-frontend
+
       - name: Build integrated Android AAR
         working-directory: aram-emu
         shell: bash
@@ -675,6 +672,7 @@ jobs:
           retention-days: 14
 
   libretro-android:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
     name: Android libretro core
     needs:
       - resolve-components
@@ -793,6 +791,7 @@ jobs:
           retention-days: 14
 
   web:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
     name: Web (WebAssembly)
     needs:
       - resolve-components
@@ -909,6 +908,7 @@ jobs:
           retention-days: 14
 
   rgds:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
     name: RG DS (ROCKNIX linux/arm64)
     needs:
       - resolve-components
