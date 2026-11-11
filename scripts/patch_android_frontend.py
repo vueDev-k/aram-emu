@@ -87,6 +87,20 @@ replace_file(
     '\t\t} else if strings.EqualFold(filepath.Clean(existing.Path), path) {\n'
     '\t\t\treturn true\n\t\t}',
 )
+# Keep the existing launcher and opener. Android library rows are SAF URIs,
+# so selecting one must invoke the *existing* native document-import flow,
+# which imports on a worker and then calls Mobile.openDocument as before.
+replace_file(
+    "shell_library.go",
+    's.openRequest(OpenRequest{Path: path, DisplayName: s.rememberedDisplayName(path)})',
+    'if strings.HasPrefix(path, "content://") {\n'
+    '\t\tif !requestNativeOpenLibraryGame(path) {\n'
+    '\t\t\ts.setStatus(s.tr("Use the native mobile document picker"))\n'
+    '\t\t}\n'
+    '\t\treturn\n'
+    '\t}\n'
+    '\ts.openRequest(OpenRequest{Path: path, DisplayName: s.rememberedDisplayName(path)})',
+)
 source = product / "android" / "frontend-overlay" / "android_library_android.go.src"
 destination = frontend / "frontend" / "android_library_android.go"
 shutil.copyfile(source, destination)
