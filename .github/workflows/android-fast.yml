@@ -1,9 +1,6 @@
 name: Android fast build
 
 on:
-  push:
-    branches:
-      - "feature/**"
   workflow_dispatch:
 
 permissions:
