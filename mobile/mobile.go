@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/mobile"
@@ -78,6 +79,39 @@ func (backend *productBackend) InstallProductUpdate(
 	return frontend.ErrProductInstallDeferred
 }
 
+// Open keeps a stable content:// identity in the existing launcher's recent and
+// favorite lists, but opens the underlying SAF document through a borrowed
+// /proc/self/fd handle. The integration backend reopens that descriptor and
+// owns its own os.File, so Android can release its borrowed handle afterward.
+func (backend *productBackend) Open(
+    ctx context.Context, request frontend.OpenRequest,
+) (frontend.InputInfo, error) {
+    return backend.OpenWithProgress(ctx, request, nil)
+}
+
+func (backend *productBackend) OpenWithProgress(
+    ctx context.Context, request frontend.OpenRequest, progress func(frontend.OpenStage),
+) (frontend.InputInfo, error) {
+    if !strings.HasPrefix(request.Path, "content://") {
+        return backend.Backend.OpenWithProgress(ctx, request, progress)
+    }
+    host := currentHost()
+    if host == nil {
+        return frontend.InputInfo{}, errors.New("Android game library host is unavailable")
+    }
+    original := request.Path
+    if request.DisplayName == "" {
+        request.DisplayName = frontend.AndroidLibraryDisplayName(original)
+    }
+    borrowedPath, err := host.OpenLibraryFile(original)
+    if err != nil {
+        return frontend.InputInfo{}, fmt.Errorf("open Android game document: %w", err)
+    }
+    defer host.CloseLibraryFile(borrowedPath)
+    request.Path = borrowedPath
+    return backend.Backend.OpenWithProgress(ctx, request, progress)
+}
+
 // Host is implemented by the native application layer. The host owns the
 // platform document picker and returns a private, backend-readable file path,
 // and it opens the platform package installer for a downloaded product update.
@@ -87,6 +121,13 @@ type Host interface {
 	// DocumentKindSaveBackup. The answer comes back through OpenDocument,
 	// OpenFirmware, OpenSaveBackup or DocumentSelectionCanceled.
 	RequestDocument(kind string)
+    // The existing Home -> Library tab owns folder selection.
+    RequestGameLibraryFolder()
+    ForgetGameLibraryFolder()
+    // OpenLibraryFile lends a seekable descriptor without copying the ZIP.
+    // CloseLibraryFile releases only the borrowed descriptor.
+    OpenLibraryFile(uri string) (string, error)
+    CloseLibraryFile(path string)
 	// ShareFile exports one file below the app's private storage through the
 	// platform document UI, so the user can keep it in accessible storage.
 	ShareFile(path, mimeType, title string) error
@@ -178,12 +219,14 @@ func SetHost(host Host) {
 		frontend.SetNativeTextInputHost(nil)
 		frontend.SetNativeShareHost(nil)
 		frontend.SetNativeShortcutHost(nil)
+        frontend.SetNativeAndroidLibraryHost(nil)
 		return
 	}
 	frontend.SetNativePickerHost(host)
 	frontend.SetNativeTextInputHost(host)
 	frontend.SetNativeShareHost(host)
 	frontend.SetNativeShortcutHost(host)
+    frontend.SetNativeAndroidLibraryHost(host)
 }
 
 // SubmitTextInput reports the text the native editor accepted for the field
@@ -200,6 +243,15 @@ func CancelTextInput(requestID int64) {
 // OpenDocument opens a package imported by the native host.
 func OpenDocument(path, displayName string) {
 	game.instance().OpenExternalDocument(path, displayName, false)
+}
+
+// UpdateGameLibrary delivers a full SAF ZIP scan into the existing Go Home
+// launcher, not into a separate Android list activity.
+func UpdateGameLibrary(entriesJSON, folderLabel string) string {
+    if err := frontend.SubmitAndroidGameLibrary(entriesJSON, folderLabel); err != nil {
+        return err.Error()
+    }
+    return ""
 }
 
 // OpenLink downloads, verifies, persists, and opens an ARAM web-player or
