@@ -68,3 +68,21 @@ func UpdateGameLibrary(entriesJSON, folderLabel string) string {
     }
     return ""
 }
+
+// Icon is also requested by the shared Home launcher. Resolve SAF URIs here
+// so the existing icon tiles and "Create shortcut" action keep working.
+func (backend *productBackend) Icon(path string) ([]byte, error) {
+    if !strings.HasPrefix(path, "content://") {
+        return backend.Backend.Icon(path)
+    }
+    host, ok := currentHost().(androidLibraryHost)
+    if !ok {
+        return nil, errors.New("Android game library host is unavailable")
+    }
+    borrowed, err := host.OpenLibraryFile(path)
+    if err != nil {
+        return nil, err
+    }
+    defer host.CloseLibraryFile(borrowed)
+    return backend.Backend.Icon(borrowed)
+}
