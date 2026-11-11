@@ -101,7 +101,6 @@ public final class MainActivity extends Activity
 
     private final ExecutorService gameLibraryScanner = Executors.newSingleThreadExecutor();
     private final AtomicInteger gameLibraryScanGeneration = new AtomicInteger();
-    private final Map<String, ParcelFileDescriptor> borrowedLibraryFiles = new LinkedHashMap<>();
     private IncomingIntentState incomingIntentState;
 
     private EbitenView gameView;
@@ -518,7 +517,7 @@ public final class MainActivity extends Activity
         String path = preferences.getString(id + ".path", "");
         String title = preferences.getString(id + ".title", "");
         if (path.startsWith("content://")) {
-            Mobile.openDocument(path, title);
+            openLibraryGame(path);
             return;
         }
         try {
@@ -755,38 +754,20 @@ public final class MainActivity extends Activity
         });
     }
 
-    // No ZIP data is copied: the backend reopens this borrowed, seekable
-    // /proc/self/fd path in the same process and owns the resulting os.File.
+    // Home library rows reuse the same SAF -> app-private import -> Go open
+    // path as the normal Android document picker. No /proc/self/fd re-open.
     @Override
-    public String openLibraryFile(String uri) throws Exception {
-        if (!"content".equals(Uri.parse(uri).getScheme())) {
-            throw new IOException("Invalid game library URI");
-        }
-        ParcelFileDescriptor descriptor = getContentResolver()
-                .openFileDescriptor(Uri.parse(uri), "r");
-        if (descriptor == null) {
-            throw new IOException("The document provider returned no file descriptor");
-        }
-        String path = "/proc/self/fd/" + descriptor.getFd();
-        synchronized (borrowedLibraryFiles) {
-            borrowedLibraryFiles.put(path, descriptor);
-        }
-        return path;
-    }
-
-    @Override
-    public void closeLibraryFile(String path) {
-        ParcelFileDescriptor descriptor;
-        synchronized (borrowedLibraryFiles) {
-            descriptor = borrowedLibraryFiles.remove(path);
-        }
-        if (descriptor != null) {
-            try {
-                descriptor.close();
-            } catch (IOException ignored) {
-                // The integration backend already owns its reopened descriptor.
+    public void openLibraryGame(String uri) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            Uri document = Uri.parse(uri);
+            if (!"content".equals(document.getScheme())) {
+                Toast.makeText(this, "올바르지 않은 게임 파일 주소입니다",
+                        Toast.LENGTH_LONG).show();
+                return;
             }
-        }
+            importDocument(document, DOCUMENT_KIND_INPUT);
+        });
     }
 
     private void refreshGameLibrary() {
@@ -1016,16 +997,6 @@ public final class MainActivity extends Activity
         }
         gameLibraryScanGeneration.incrementAndGet();
         gameLibraryScanner.shutdownNow();
-        synchronized (borrowedLibraryFiles) {
-            for (ParcelFileDescriptor descriptor : borrowedLibraryFiles.values()) {
-                try {
-                    descriptor.close();
-                } catch (IOException ignored) {
-                    // Activity is closing.
-                }
-            }
-            borrowedLibraryFiles.clear();
-        }
         Mobile.setHost(null);
         super.onDestroy();
     }
