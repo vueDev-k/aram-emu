@@ -134,22 +134,14 @@ jobs:
           TEST_RUNNER_SHA: ${{ steps.requested.outputs.test_runner_ref }}
 
   workspace-gate:
-    name: Pinned synthetic compatibility
+    name: Public workspace regression
     needs: resolve-components
-    # Forks cannot receive the credential for the private test runner. Their
-    # public platform checks still run; publication always requires this gate.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/workspace-gate.yml
-    secrets:
-      ARAM_TEST_DEPLOY_KEY: ${{ secrets.ARAM_TEST_DEPLOY_KEY }}
     with:
       product_sha: ${{ github.sha }}
       core_sha: ${{ needs.resolve-components.outputs.core_sha }}
       frontend_sha: ${{ needs.resolve-components.outputs.frontend_sha }}
       authd_sha: ${{ needs.resolve-components.outputs.authd_sha }}
-      test_runner_sha: ${{ needs.resolve-components.outputs.test_runner_sha }}
 
   desktop:
     name: ${{ matrix.name }}
