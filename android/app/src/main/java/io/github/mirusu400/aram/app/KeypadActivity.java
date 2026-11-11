@@ -3,6 +3,9 @@ package io.github.mirusu400.aram.app;
 import android.app.Activity;
 import android.hardware.input.InputManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.InputDevice;
@@ -35,6 +38,10 @@ public final class KeypadActivity extends Activity {
     private static final int TOUCH_DEVICE = Integer.MIN_VALUE;
     private final HeldControls heldControls = new HeldControls(Mobile::pressControl);
     private final List<Button> buttons = new ArrayList<>();
+    private static final String THEME_PREF = "phone_theme";
+    private static final String THEME_KEY = "selected";
+    private static final String[] THEME_NAMES = {"Classic · Silver", "Modern · Dark"};
+    private int selectedTheme;
     private InputManager inputManager;
     private InputManager.InputDeviceListener inputListener;
 
@@ -42,6 +49,7 @@ public final class KeypadActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        selectedTheme = getSharedPreferences(THEME_PREF, MODE_PRIVATE).getInt(THEME_KEY, 0);
         setContentView(buildKeypad());
         inputManager = (InputManager) getSystemService(INPUT_SERVICE);
         if (inputManager != null) {
@@ -210,15 +218,38 @@ public final class KeypadActivity extends Activity {
     private View buildKeypad() {
         int pad = dp(8);
         LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.HORIZONTAL);
-        root.setBackgroundColor(Color.rgb(18, 18, 22));
+        root.setOrientation(LinearLayout.VERTICAL);
+        int bezel = selectedTheme == 0 ? Color.rgb(166, 172, 183) : Color.rgb(15, 18, 25);
+        root.setBackgroundColor(bezel);
         root.setPadding(pad, pad, pad, pad);
+        Button theme = new Button(this);
+        theme.setText(THEME_NAMES[selectedTheme] + "  ▾");
+        theme.setAllCaps(false);
+        theme.setTextSize(12);
+        theme.setTextColor(selectedTheme == 0 ? Color.rgb(27, 34, 45) : Color.WHITE);
+        theme.setBackground(buttonBackground(selectedTheme == 0 ? Color.rgb(221, 226, 233) : Color.rgb(38, 43, 58), dp(10), selectedTheme == 0 ? Color.rgb(105, 112, 125) : Color.rgb(65, 73, 95)));
+        theme.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("피처폰 테마")
+                .setSingleChoiceItems(THEME_NAMES, selectedTheme, (dialog, which) -> {
+                    releaseInputs();
+                    selectedTheme = which;
+                    getSharedPreferences(THEME_PREF, MODE_PRIVATE).edit().putInt(THEME_KEY, which).apply();
+                    buttons.clear();
+                    setContentView(buildKeypad());
+                    dialog.dismiss();
+                }).setNegativeButton("취소", null).show());
+        root.addView(theme, new LinearLayout.LayoutParams(-1, dp(42)));
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setPadding(0, dp(4), 0, 0);
+        panel.setBackground(buttonBackground(selectedTheme == 0 ? Color.rgb(112, 120, 133) : Color.rgb(23, 27, 38), dp(18), selectedTheme == 0 ? Color.rgb(79, 85, 97) : Color.rgb(55, 64, 84)));
         // The physical pad is forwarded to the game, not used to move between
         // these keys, so the buttons stay out of the focus order.
         root.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
 
-        root.addView(buildDirectionalSide(), equalColumn());
-        root.addView(buildNumericSide(), equalColumn());
+        panel.addView(buildDirectionalSide(), equalColumn());
+        panel.addView(buildNumericSide(), equalColumn());
+        root.addView(panel, new LinearLayout.LayoutParams(-1, 0, 1));
         return root;
     }
 
@@ -285,6 +316,13 @@ public final class KeypadActivity extends Activity {
         buttons.add(button);
         button.setText(label);
         button.setAllCaps(false);
+        button.setTextSize(selectedTheme == 0 ? 13 : 12);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setTextColor(selectedTheme == 0 ? Color.rgb(25, 30, 40) : Color.rgb(235, 242, 255));
+        button.setBackground(buttonBackground(
+                selectedTheme == 0 ? Color.rgb(235, 239, 244) : Color.rgb(42, 49, 67),
+                dp(selectedTheme == 0 ? 22 : 9),
+                selectedTheme == 0 ? Color.rgb(111, 119, 132) : Color.rgb(73, 89, 120)));
         int margin = dp(3);
         button.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
@@ -307,6 +345,14 @@ public final class KeypadActivity extends Activity {
         params.setMargins(margin, margin, margin, margin);
         button.setLayoutParams(params);
         return button;
+    }
+
+    private GradientDrawable buttonBackground(int color, int radius, int stroke) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radius);
+        drawable.setStroke(dp(1), stroke);
+        return drawable;
     }
 
     private View spacer() {
