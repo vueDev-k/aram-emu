@@ -91,12 +91,12 @@ replace_file(
 # a game must not run the desktop rescan (which would wipe the SAF snapshot).
 replace_file(
     "shell_media.go",
-    '\t// Closing a title returns to the Home surface; refresh the Installed tab in\\n'
-    '\t// case the library changed while a title was open.\\n'
+    '\t// Closing a title returns to the Home surface; refresh the Installed tab in\n'
+    '\t// case the library changed while a title was open.\n'
     '\ts.rescanLibrary()',
-    '\t// Keep the native SAF library already scanned on Android.\\n'
-    '\tif androidFolderLabel == "" {\\n'
-    '\t\ts.rescanLibrary()\\n'
+    '\t// Keep the native SAF library already scanned on Android.\n'
+    '\tif androidFolderLabel == "" {\n'
+    '\t\ts.rescanLibrary()\n'
     '\t}',
 )
 
