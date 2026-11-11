@@ -14,6 +14,7 @@ import (
 type NativeAndroidLibraryHost interface {
     RequestGameLibraryFolder()
     ForgetGameLibraryFolder()
+    OpenLibraryGame(uri string)
 }
 
 var androidLibraryHost struct {
@@ -45,6 +46,17 @@ func requestForgetAndroidLibraryFolder() {
     if host != nil {
         host.ForgetGameLibraryFolder()
     }
+}
+
+func requestNativeOpenLibraryGame(uri string) bool {
+    androidLibraryHost.RLock()
+    host := androidLibraryHost.host
+    androidLibraryHost.RUnlock()
+    if host == nil {
+        return false
+    }
+    host.OpenLibraryGame(uri)
+    return true
 }
 
 type androidLibraryRecord struct {
