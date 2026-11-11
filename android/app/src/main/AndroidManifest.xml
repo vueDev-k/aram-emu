@@ -17,6 +17,16 @@
         android:theme="@style/Theme.ARAM"
         android:usesCleartextTraffic="false">
         <activity
+            android:name=".GameLibraryActivity"
+            android:exported="true"
+            android:label="ARAM 게임 라이브러리">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
