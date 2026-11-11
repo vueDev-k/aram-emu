@@ -17,7 +17,6 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 
 /** Optional Android launcher for a persistent folder-based ZIP game library. */
 public final class GameLibraryActivity extends Activity {
@@ -87,7 +86,7 @@ public final class GameLibraryActivity extends Activity {
             Uri tree = Uri.parse(saved);
             String root = DocumentsContract.getTreeDocumentId(tree);
             scanDirectory(tree, root, 0, new int[]{0});
-            Collections.sort(games, Comparator.comparing(g -> g.title.toLowerCase(java.util.Locale.ROOT)));
+            Collections.sort(games, (a, b) -> a.title.compareToIgnoreCase(b.title));
             for (Game game : games) adapter.add(game.title);
             status.setText("게임 " + games.size() + "개");
         } catch (Exception e) {
