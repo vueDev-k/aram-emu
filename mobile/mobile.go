@@ -103,6 +103,12 @@ type Host interface {
 	// The native host persists the private path and puts only an opaque ID in
 	// the launcher intent.
 	PinGameShortcut(path, title string, iconPNG []byte) error
+	// Android SAF game library operations. These belong on Host so gomobile
+	// exposes them to Java and the proxy can dispatch them back into Android.
+	RequestGameLibraryFolder()
+	ForgetGameLibraryFolder()
+	OpenLibraryFile(uri string) (string, error)
+	CloseLibraryFile(path string)
 }
 
 // PerformanceHost receives callbacks on the actual locked emulation/audio OS
